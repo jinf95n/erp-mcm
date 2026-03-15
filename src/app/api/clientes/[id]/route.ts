@@ -12,7 +12,7 @@ export async function GET(
   const { id } = await params
   const cliente = await prisma.cliente.findUnique({
     where: { id },
-    include: { ventas: { include: { pagos: true }, orderBy: { createdAt: 'desc' } } },
+    include: { ventas: { where: { deletedAt: null }, include: { pagos: true }, orderBy: { createdAt: 'desc' } } },
   })
 
   if (!cliente) return NextResponse.json({ error: 'No encontrado' }, { status: 404 })
@@ -63,13 +63,28 @@ export async function DELETE(
   const { id } = await params
 
   try {
-    const ventas = await prisma.venta.findMany({ where: { clienteId: id }, select: { id: true } })
-    for (const v of ventas) {
-      await prisma.pago.deleteMany({ where: { ventaId: v.id } })
+    // Verificar si tiene ventas o pagos registrados
+    const ventasCount = await prisma.venta.count({ where: { clienteId: id } })
+    const pagosCount = await prisma.pago.count({
+      where: { venta: { clienteId: id } },
+    })
+
+    if (ventasCount > 0 || pagosCount > 0) {
+      // Soft delete: el historial financiero se conserva
+      await prisma.cliente.update({
+        where: { id },
+        data: { deletedAt: new Date(), activo: false },
+      })
+      return NextResponse.json({
+        ok: true,
+        archived: true,
+        message: 'Cliente archivado. El historial de ventas y pagos se conserva.',
+      })
     }
-    await prisma.venta.deleteMany({ where: { clienteId: id } })
+
+    // Sin historial: eliminar definitivamente
     await prisma.cliente.delete({ where: { id } })
-    return NextResponse.json({ ok: true })
+    return NextResponse.json({ ok: true, archived: false })
   } catch (error) {
     console.error(error)
     return NextResponse.json({ error: 'Error al eliminar' }, { status: 500 })

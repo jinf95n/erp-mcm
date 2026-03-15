@@ -1,11 +1,14 @@
+// src/app/dashboard/ventas/page.tsx
+
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Plus } from 'lucide-react'
+import { Plus, Trash2, Pencil } from 'lucide-react'
 import { formatCurrency } from '@/src/lib/utils'
 
-interface Cliente { id: string; nombre: string; empresa: string | null }
-interface Pago { id: string; monto: number; tipoPago: string; fecha: string; notas: string | null }
+interface Cliente    { id: string; nombre: string; empresa: string | null }
+interface Pago       { id: string; monto: number; tipoPago: string; fecha: string; notas: string | null }
+interface CostoVenta { id: string; descripcion: string; monto: number; personaNombre: string | null }
 interface Venta {
   id: string
   nombreProyecto: string
@@ -14,120 +17,227 @@ interface Venta {
   pagoInicial: number
   cantidadCuotas: number
   valorCuota: number
-  costoDesarrollador: number
-  costoPM: number
-  comisionVendedor: number
   estado: string
   totalPagado: number
+  totalCostos: number
   cliente: Cliente
   pagos: Pago[]
+  costos: CostoVenta[]
+}
+
+interface CostoForm {
+  descripcion: string
+  monto: string
+  personaNombre: string
 }
 
 const ESTADOS: Record<string, { label: string; color: string }> = {
-  activo:      { label: 'Activo',      color: 'bg-blue-900/40 text-blue-400 border-blue-700/40' },
-  completado:  { label: 'Completado',  color: 'bg-green-900/40 text-green-400 border-green-700/40' },
-  cancelado:   { label: 'Cancelado',   color: 'bg-red-900/40 text-red-400 border-red-700/40' },
+  activo:     { label: 'Activo',     color: 'bg-blue-900/40 text-blue-400 border-blue-700/40'   },
+  completado: { label: 'Completado', color: 'bg-green-900/40 text-green-400 border-green-700/40' },
+  cancelado:  { label: 'Cancelado',  color: 'bg-red-900/40 text-red-400 border-red-700/40'      },
 }
 
-const TIPOS = ['landing', 'web', 'ecommerce', 'campania', 'automation', 'otro']
+const TIPOS = ['landing', 'web', 'ecommerce', 'campania', 'automation', 'paid_media', 'social_media', 'ads', 'seo', 'otro']
+
+const PRESETS_COSTOS: Record<string, CostoForm[]> = {
+  landing:      [{ descripcion: 'Desarrollo', monto: '78000', personaNombre: 'Juan' }, { descripcion: 'Comisión vendedor', monto: '', personaNombre: 'Carlos' }],
+  web:          [{ descripcion: 'Desarrollo', monto: '78000', personaNombre: 'Juan' }, { descripcion: 'PM', monto: '28000', personaNombre: 'Carlos' }, { descripcion: 'Comisión vendedor', monto: '', personaNombre: 'Carlos' }],
+  ecommerce:    [{ descripcion: 'Desarrollo', monto: '78000', personaNombre: 'Juan' }, { descripcion: 'PM', monto: '28000', personaNombre: 'Carlos' }, { descripcion: 'Comisión vendedor', monto: '', personaNombre: 'Carlos' }],
+  paid_media:   [{ descripcion: 'Gestión paid media', monto: '', personaNombre: 'Carlos' }, { descripcion: 'Comisión vendedor', monto: '', personaNombre: 'Carlos' }],
+  social_media: [{ descripcion: 'Gestión social media', monto: '', personaNombre: 'Carlos' }, { descripcion: 'Comisión vendedor', monto: '', personaNombre: 'Carlos' }],
+  ads:          [{ descripcion: 'Gestión de ads', monto: '', personaNombre: 'Carlos' }, { descripcion: 'Comisión vendedor', monto: '', personaNombre: 'Carlos' }],
+  seo:          [{ descripcion: 'SEO / Contenido', monto: '', personaNombre: 'Juan' }, { descripcion: 'Comisión vendedor', monto: '', personaNombre: 'Carlos' }],
+  campania:     [{ descripcion: 'Producción', monto: '', personaNombre: 'Juan' }, { descripcion: 'Gestión de campaña', monto: '', personaNombre: 'Carlos' }, { descripcion: 'Comisión vendedor', monto: '', personaNombre: 'Carlos' }],
+  automation:   [{ descripcion: 'Desarrollo', monto: '78000', personaNombre: 'Juan' }, { descripcion: 'Comisión vendedor', monto: '', personaNombre: 'Carlos' }],
+  otro:         [{ descripcion: 'Costo principal', monto: '', personaNombre: '' }, { descripcion: 'Comisión vendedor', monto: '', personaNombre: 'Carlos' }],
+}
+
+function getPreset(tipo: string, precioTotal: string): CostoForm[] {
+  const precio = parseFloat(precioTotal) || 0
+  return (PRESETS_COSTOS[tipo] || PRESETS_COSTOS.otro).map(c => ({
+    ...c,
+    monto: c.descripcion.toLowerCase().includes('comisión') && !c.monto && precio > 0
+      ? Math.round(precio * 0.2).toString()
+      : c.monto,
+  }))
+}
+
+function calcWaterfall(totalPagado: number, costos: { monto: number }[]) {
+  let restante = totalPagado
+  const cobrado = costos.map(c => {
+    const cubierto = Math.min(restante, c.monto)
+    restante -= cubierto
+    return cubierto
+  })
+  return { cobrado, ganancia: restante }
+}
 
 function getToken() { return typeof window !== 'undefined' ? localStorage.getItem('token') : '' }
-function authHeaders() { return { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` } }
+function authH()    { return { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` } }
 
-const FORM_VACIO = {
+const FORM_BASE = {
   clienteId: '', nombreProyecto: '', tipoServicio: 'web',
   precioTotal: '', pagoInicial: '', cantidadCuotas: '', valorCuota: '',
-  costoDesarrollador: '', costoPM: '', comisionVendedor: '',
 }
 
 export default function VentasPage() {
-  const [ventas, setVentas] = useState<Venta[]>([])
-  const [clientes, setClientes] = useState<Cliente[]>([])
-  const [total, setTotal] = useState(0)
-  const [loading, setLoading] = useState(true)
+  const [ventas, setVentas]           = useState<Venta[]>([])
+  const [clientes, setClientes]       = useState<Cliente[]>([])
+  const [total, setTotal]             = useState(0)
+  const [loading, setLoading]         = useState(true)
   const [filterEstado, setFilterEstado] = useState('')
-  const [modalOpen, setModalOpen] = useState(false)
-  const [detalle, setDetalle] = useState<Venta | null>(null)
-  const [form, setForm] = useState(FORM_VACIO)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-  // Modal agregar pago
-  const [pagoModal, setPagoModal] = useState(false)
-  const [pagoForm, setPagoForm] = useState({ monto: '', tipoPago: 'cuota', notas: '' })
+  const [modalOpen, setModalOpen]     = useState(false)
+  const [detalle, setDetalle]         = useState<Venta | null>(null)
+  const [form, setForm]               = useState(FORM_BASE)
+  const [costos, setCostos]           = useState<CostoForm[]>(PRESETS_COSTOS.web)
+  const [saving, setSaving]           = useState(false)
+  const [error, setError]             = useState('')
+  // Pago
+  const [pagoModal, setPagoModal]     = useState(false)
+  const [pagoForm, setPagoForm]       = useState({ monto: '', tipoPago: 'cuota', notas: '' })
+  // Editar costos de venta existente
+  const [editCostosModal, setEditCostosModal] = useState(false)
+  const [editCostos, setEditCostos]   = useState<CostoForm[]>([])
+  const [editCostosSaving, setEditCostosSaving] = useState(false)
+  // Eliminar venta
+  const [deleteId, setDeleteId]       = useState<string | null>(null)
+  const [deleteMsg, setDeleteMsg]     = useState('')
 
   const fetchVentas = useCallback(async () => {
     setLoading(true)
     try {
       const params = new URLSearchParams()
       if (filterEstado) params.set('estado', filterEstado)
-      const res = await fetch(`/api/ventas?${params}`, { headers: authHeaders() })
+      const res  = await fetch(`/api/ventas?${params}`, { headers: authH() })
       const data = await res.json()
       setVentas(data.ventas || [])
       setTotal(data.total || 0)
     } catch { setError('Error al cargar ventas') }
-    finally { setLoading(false) }
+    finally   { setLoading(false) }
   }, [filterEstado])
 
   useEffect(() => { fetchVentas() }, [fetchVentas])
-
   useEffect(() => {
-    fetch('/api/clientes?limit=100', { headers: authHeaders() })
-      .then(r => r.json())
-      .then(d => setClientes(d.clientes || []))
+    fetch('/api/clientes?limit=100', { headers: authH() })
+      .then(r => r.json()).then(d => setClientes(d.clientes || []))
   }, [])
+
+  // Auto-calcs al crear venta
+  function handleTipoChange(tipo: string) {
+    setForm(p => ({ ...p, tipoServicio: tipo }))
+    setCostos(getPreset(tipo, form.precioTotal))
+  }
+  function handlePrecioChange(precio: string) {
+    setForm(p => ({ ...p, precioTotal: precio }))
+    const val = parseFloat(precio) || 0
+    setCostos(prev => prev.map(c =>
+      c.descripcion.toLowerCase().includes('comisión')
+        ? { ...c, monto: val > 0 ? Math.round(val * 0.2).toString() : c.monto }
+        : c
+    ))
+  }
+  useEffect(() => {
+    const precio  = parseFloat(form.precioTotal)  || 0
+    const inicial = parseFloat(form.pagoInicial)  || 0
+    const cuotas  = parseInt(form.cantidadCuotas) || 0
+    if (precio > 0 && cuotas > 0)
+      setForm(p => ({ ...p, valorCuota: Math.round((precio - inicial) / cuotas).toString() }))
+  }, [form.precioTotal, form.pagoInicial, form.cantidadCuotas])
+
+  function addCosto()                              { setCostos(p => [...p, { descripcion: '', monto: '', personaNombre: '' }]) }
+  function removeCosto(i: number)                  { setCostos(p => p.filter((_, idx) => idx !== i)) }
+  function updCosto(i: number, f: keyof CostoForm, v: string) { setCostos(p => p.map((c, idx) => idx === i ? { ...c, [f]: v } : c)) }
+
+  // Mismas helpers para edición de costos de venta existente
+  function addEditCosto()                              { setEditCostos(p => [...p, { descripcion: '', monto: '', personaNombre: '' }]) }
+  function removeEditCosto(i: number)                  { setEditCostos(p => p.filter((_, idx) => idx !== i)) }
+  function updEditCosto(i: number, f: keyof CostoForm, v: string) { setEditCostos(p => p.map((c, idx) => idx === i ? { ...c, [f]: v } : c)) }
 
   async function handleSave() {
     if (!form.clienteId || !form.nombreProyecto || !form.precioTotal) {
-      setError('Cliente, proyecto y precio total son requeridos')
-      return
+      setError('Cliente, proyecto y precio total son requeridos'); return
     }
-    setSaving(true)
-    setError('')
+    setSaving(true); setError('')
     try {
-      const res = await fetch('/api/ventas', {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify(form),
-      })
+      const res  = await fetch('/api/ventas', { method: 'POST', headers: authH(), body: JSON.stringify({ ...form, costos }) })
       const data = await res.json()
-      if (!res.ok) { setError(data.error || 'Error al guardar'); return }
-      setModalOpen(false)
-      setForm(FORM_VACIO)
-      fetchVentas()
+      if (!res.ok) { setError(data.error || 'Error'); return }
+      setModalOpen(false); setForm(FORM_BASE); setCostos(PRESETS_COSTOS.web); fetchVentas()
     } catch { setError('Error de conexión') }
-    finally { setSaving(false) }
+    finally   { setSaving(false) }
   }
 
   async function cambiarEstado(id: string, estado: string) {
-    await fetch(`/api/ventas/${id}`, {
-      method: 'PUT',
-      headers: authHeaders(),
-      body: JSON.stringify({ estado }),
-    })
+    await fetch(`/api/ventas/${id}`, { method: 'PUT', headers: authH(), body: JSON.stringify({ estado }) })
     fetchVentas()
     if (detalle?.id === id) setDetalle(prev => prev ? { ...prev, estado } : null)
   }
 
+  // Guardar costos editados de venta existente
+  async function handleSaveEditCostos() {
+    if (!detalle) return
+    setEditCostosSaving(true)
+    try {
+      const res  = await fetch(`/api/ventas/${detalle.id}`, {
+        method: 'PUT', headers: authH(), body: JSON.stringify({ costos: editCostos }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setEditCostosModal(false)
+        setDetalle(data)
+        fetchVentas()
+      }
+    } finally { setEditCostosSaving(false) }
+  }
+
+  // Abrir modal editar costos
+  function openEditCostos() {
+    if (!detalle) return
+    setEditCostos(detalle.costos.map(c => ({
+      descripcion:   c.descripcion,
+      monto:         c.monto.toString(),
+      personaNombre: c.personaNombre || '',
+    })))
+    setEditCostosModal(true)
+  }
+
+  // Eliminar venta
+  async function handleDelete(id: string) {
+    try {
+      const res  = await fetch(`/api/ventas/${id}`, { method: 'DELETE', headers: authH() })
+      const data = await res.json()
+      setDeleteId(null)
+      if (data.archived) {
+        setDeleteMsg('La venta fue archivada (tenía pagos registrados). El historial se conserva.')
+        setTimeout(() => setDeleteMsg(''), 5000)
+      }
+      setDetalle(null)
+      fetchVentas()
+    } catch { setError('Error al eliminar') }
+  }
+
+  // Agregar pago
   async function agregarPago() {
     if (!pagoForm.monto || !detalle) return
     setSaving(true)
     try {
       const res = await fetch('/api/pagos', {
-        method: 'POST',
-        headers: authHeaders(),
+        method: 'POST', headers: authH(),
         body: JSON.stringify({ ventaId: detalle.id, ...pagoForm }),
       })
       if (res.ok) {
-        setPagoModal(false)
-        setPagoForm({ monto: '', tipoPago: 'cuota', notas: '' })
-        // Recargar detalle
-        const r2 = await fetch(`/api/ventas/${detalle.id}`, { headers: authHeaders() })
-        const d = await r2.json()
-        setDetalle({ ...d, totalPagado: d.pagos.reduce((s: number, p: Pago) => s + p.monto, 0) })
-        fetchVentas()
+        setPagoModal(false); setPagoForm({ monto: '', tipoPago: 'cuota', notas: '' })
+        const r2 = await fetch(`/api/ventas/${detalle.id}`, { headers: authH() })
+        const d  = await r2.json()
+        setDetalle(d); fetchVentas()
       }
     } finally { setSaving(false) }
   }
+
+  const precioNum  = parseFloat(form.precioTotal) || 0
+  const costosNum  = costos.map(c => ({ monto: parseFloat(c.monto) || 0 }))
+  const totalCost  = costosNum.reduce((s, c) => s + c.monto, 0)
+  const ganEstimada = Math.max(precioNum - totalCost, 0)
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -137,31 +247,33 @@ export default function VentasPage() {
           <p className="text-gray-400 text-sm mt-1">{total} venta{total !== 1 ? 's' : ''}</p>
         </div>
         <button
-          onClick={() => { setModalOpen(true); setError('') }}
+          onClick={() => { setForm(FORM_BASE); setCostos(PRESETS_COSTOS.web); setModalOpen(true); setError('') }}
           className="flex items-center gap-2 bg-yellow-400 hover:bg-yellow-300 text-gray-900 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors"
         >
-          <Plus className="w-4 h-4" />
-          Nueva venta
+          <Plus className="w-4 h-4" /> Nueva venta
         </button>
       </div>
+
+      {deleteMsg && (
+        <div className="mb-4 bg-yellow-900/30 border border-yellow-700/40 text-yellow-300 text-sm rounded-xl px-4 py-3">
+          {deleteMsg}
+        </div>
+      )}
 
       {/* Filtros */}
       <div className="flex gap-2 mb-6 flex-wrap">
         {[{ value: '', label: 'Todas' }, ...Object.entries(ESTADOS).map(([v, { label }]) => ({ value: v, label }))].map(opt => (
-          <button
-            key={opt.value}
-            onClick={() => setFilterEstado(opt.value)}
+          <button key={opt.value} onClick={() => setFilterEstado(opt.value)}
             className={`px-3.5 py-1.5 rounded-xl text-xs font-medium border transition-colors ${
               filterEstado === opt.value
                 ? 'bg-yellow-400 border-yellow-400 text-gray-900'
                 : 'bg-gray-800 border-gray-700 text-gray-400 hover:text-white'
             }`}
-          >
-            {opt.label}
-          </button>
+          >{opt.label}</button>
         ))}
       </div>
 
+      {/* Grid */}
       {loading ? (
         <div className="flex items-center justify-center py-16">
           <div className="w-6 h-6 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" />
@@ -174,25 +286,24 @@ export default function VentasPage() {
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {ventas.map(v => {
-            const pct = v.precioTotal > 0 ? Math.min((v.totalPagado / v.precioTotal) * 100, 100) : 0
-            const ganancia = v.totalPagado - (v.costoDesarrollador + v.costoPM + v.comisionVendedor) * (v.totalPagado / v.precioTotal)
-            const estadoInfo = ESTADOS[v.estado] || ESTADOS.activo
+            const pct      = v.precioTotal > 0 ? Math.min((v.totalPagado / v.precioTotal) * 100, 100) : 0
+            const { ganancia } = calcWaterfall(v.totalPagado, v.costos)
+            const estadoInfo   = ESTADOS[v.estado] || ESTADOS.activo
             return (
-              <div
-                key={v.id}
-                onClick={() => setDetalle(v)}
+              <div key={v.id} onClick={() => setDetalle(v)}
                 className="bg-gray-900 border border-gray-800 rounded-2xl p-5 cursor-pointer hover:border-gray-600 transition-colors"
               >
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex-1 min-w-0 mr-3">
                     <p className="text-sm font-semibold text-white truncate">{v.nombreProyecto}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">{v.cliente.nombre}{v.cliente.empresa ? ` · ${v.cliente.empresa}` : ''}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {v.cliente.nombre}{v.cliente.empresa ? ` · ${v.cliente.empresa}` : ''}
+                    </p>
                   </div>
                   <span className={`inline-flex px-2.5 py-1 rounded-lg text-xs font-medium border flex-shrink-0 ${estadoInfo.color}`}>
                     {estadoInfo.label}
                   </span>
                 </div>
-
                 <div className="mb-3">
                   <div className="flex justify-between text-xs mb-1.5">
                     <span className="text-gray-400">Cobrado</span>
@@ -202,10 +313,9 @@ export default function VentasPage() {
                     <div className="h-full bg-yellow-400 rounded-full" style={{ width: `${pct}%` }} />
                   </div>
                 </div>
-
                 <div className="flex justify-between text-xs text-gray-500">
-                  <span className="capitalize">{v.tipoServicio}</span>
-                  <span className="text-green-400">Ganancia: {formatCurrency(ganancia)}</span>
+                  <span className="capitalize">{v.tipoServicio.replace('_', ' ')}</span>
+                  <span className={ganancia > 0 ? 'text-green-400' : 'text-gray-500'}>Ganancia: {formatCurrency(ganancia)}</span>
                 </div>
               </div>
             )
@@ -213,7 +323,7 @@ export default function VentasPage() {
         </div>
       )}
 
-      {/* Modal nueva venta */}
+      {/* ── Modal nueva venta ─────────────────────────────────────────────── */}
       {modalOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] flex flex-col">
@@ -224,58 +334,96 @@ export default function VentasPage() {
             <div className="p-6 space-y-4 overflow-y-auto">
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-1.5">Cliente *</label>
-                <select
-                  value={form.clienteId}
-                  onChange={e => setForm(p => ({ ...p, clienteId: e.target.value }))}
-                  className="w-full bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400"
-                >
+                <select value={form.clienteId} onChange={e => setForm(p => ({ ...p, clienteId: e.target.value }))}
+                  className="w-full bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400">
                   <option value="">Seleccionar...</option>
                   {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}{c.empresa ? ` — ${c.empresa}` : ''}</option>)}
                 </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-1.5">Nombre del proyecto *</label>
-                <input type="text" value={form.nombreProyecto} onChange={e => setForm(p => ({ ...p, nombreProyecto: e.target.value }))} placeholder="Ej: Sitio web corporativo" className="w-full bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-2.5 text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
+                <input type="text" value={form.nombreProyecto} onChange={e => setForm(p => ({ ...p, nombreProyecto: e.target.value }))}
+                  placeholder="Ej: Campaña Meta Yanina"
+                  className="w-full bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-2.5 text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1.5">Tipo de servicio</label>
-                <select value={form.tipoServicio} onChange={e => setForm(p => ({ ...p, tipoServicio: e.target.value }))} className="w-full bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400">
-                  {TIPOS.map(t => <option key={t} value={t} className="capitalize">{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">
+                  Tipo de servicio <span className="text-xs text-gray-600 ml-1">(pre-carga costos)</span>
+                </label>
+                <select value={form.tipoServicio} onChange={e => handleTipoChange(e.target.value)}
+                  className="w-full bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400">
+                  {TIPOS.map(t => <option key={t} value={t}>{t.replace('_', ' ').charAt(0).toUpperCase() + t.replace('_', ' ').slice(1)}</option>)}
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-1.5">Precio total *</label>
-                  <input type="number" value={form.precioTotal} onChange={e => setForm(p => ({ ...p, precioTotal: e.target.value }))} placeholder="500000" className="w-full bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-2.5 text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
+                  <input type="number" value={form.precioTotal} onChange={e => handlePrecioChange(e.target.value)}
+                    placeholder="400000"
+                    className="w-full bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-2.5 text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-1.5">Pago inicial</label>
-                  <input type="number" value={form.pagoInicial} onChange={e => setForm(p => ({ ...p, pagoInicial: e.target.value }))} placeholder="150000" className="w-full bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-2.5 text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
+                  <input type="number" value={form.pagoInicial} onChange={e => setForm(p => ({ ...p, pagoInicial: e.target.value }))}
+                    placeholder="150000"
+                    className="w-full bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-2.5 text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-1.5">Cuotas</label>
-                  <input type="number" value={form.cantidadCuotas} onChange={e => setForm(p => ({ ...p, cantidadCuotas: e.target.value }))} placeholder="3" className="w-full bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-2.5 text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
+                  <input type="number" value={form.cantidadCuotas} onChange={e => setForm(p => ({ ...p, cantidadCuotas: e.target.value }))}
+                    placeholder="4"
+                    className="w-full bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-2.5 text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-1.5">Valor cuota</label>
-                  <input type="number" value={form.valorCuota} onChange={e => setForm(p => ({ ...p, valorCuota: e.target.value }))} placeholder="116666" className="w-full bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-2.5 text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
+                  <label className="block text-sm font-medium text-gray-300 mb-1.5">Valor cuota <span className="text-gray-600 text-xs">(auto)</span></label>
+                  <input type="number" value={form.valorCuota} onChange={e => setForm(p => ({ ...p, valorCuota: e.target.value }))}
+                    placeholder="se calcula"
+                    className="w-full bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-2.5 text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
                 </div>
               </div>
-              <p className="text-xs text-gray-500 font-medium uppercase tracking-wider">Costos internos</p>
-              <div className="grid grid-cols-3 gap-3">
-                {[
-                  { label: 'Desarrollador', key: 'costoDesarrollador' },
-                  { label: 'PM', key: 'costoPM' },
-                  { label: 'Comisión', key: 'comisionVendedor' },
-                ].map(f => (
-                  <div key={f.key}>
-                    <label className="block text-xs font-medium text-gray-400 mb-1">{f.label}</label>
-                    <input type="number" value={form[f.key as keyof typeof form]} onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))} placeholder="0" className="w-full bg-gray-800 border border-gray-700 text-white rounded-xl px-3 py-2 text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
-                  </div>
-                ))}
+
+              {/* Costos dinámicos */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs text-gray-500 font-medium uppercase tracking-wider">
+                    Costos <span className="normal-case font-normal text-gray-600">(se pagan en este orden)</span>
+                  </p>
+                  <button onClick={addCosto} className="text-xs text-yellow-400 hover:text-yellow-300">+ Agregar</button>
+                </div>
+                <div className="space-y-2">
+                  {costos.map((c, i) => (
+                    <div key={i} className="grid grid-cols-12 gap-2 items-center">
+                      <span className="col-span-1 text-xs text-gray-600 text-center">{i + 1}.</span>
+                      <input type="text" value={c.descripcion} onChange={e => updCosto(i, 'descripcion', e.target.value)}
+                        placeholder="Descripción"
+                        className="col-span-4 bg-gray-800 border border-gray-700 text-white rounded-xl px-3 py-2 text-xs placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-yellow-400" />
+                      <input type="number" value={c.monto} onChange={e => updCosto(i, 'monto', e.target.value)}
+                        placeholder="Monto"
+                        className="col-span-3 bg-gray-800 border border-gray-700 text-white rounded-xl px-3 py-2 text-xs placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-yellow-400" />
+                      <input type="text" value={c.personaNombre} onChange={e => updCosto(i, 'personaNombre', e.target.value)}
+                        placeholder="Quién"
+                        className="col-span-3 bg-gray-800 border border-gray-700 text-white rounded-xl px-3 py-2 text-xs placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-yellow-400" />
+                      <button onClick={() => removeCosto(i)} className="col-span-1 text-gray-600 hover:text-red-400 transition-colors flex justify-center">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
+
+              {/* Preview */}
+              {precioNum > 0 && (
+                <div className="bg-gray-800/60 rounded-xl px-4 py-3 text-xs space-y-1.5">
+                  <p className="text-gray-500 font-medium uppercase tracking-wide mb-1.5">Estimado al cobrar el total</p>
+                  <div className="flex justify-between text-gray-400"><span>Total costos</span><span>{formatCurrency(totalCost)}</span></div>
+                  <div className="flex justify-between font-semibold border-t border-gray-700 pt-1.5">
+                    <span className="text-gray-300">Ganancia agencia</span>
+                    <span className={ganEstimada >= 0 ? 'text-green-400' : 'text-red-400'}>{formatCurrency(ganEstimada)}</span>
+                  </div>
+                </div>
+              )}
               {error && <p className="text-red-400 text-sm bg-red-950/50 border border-red-800 rounded-xl px-4 py-2.5">{error}</p>}
             </div>
             <div className="flex gap-3 px-6 pb-6">
@@ -288,15 +436,20 @@ export default function VentasPage() {
         </div>
       )}
 
-      {/* Detalle venta */}
+      {/* ── Detalle venta ─────────────────────────────────────────────────── */}
       {detalle && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between px-6 py-5 border-b border-gray-800">
-              <h2 className="text-lg font-semibold text-white truncate mr-4">{detalle.nombreProyecto}</h2>
+              <div className="min-w-0 mr-4">
+                <h2 className="text-lg font-semibold text-white truncate">{detalle.nombreProyecto}</h2>
+                <p className="text-xs text-gray-500 capitalize mt-0.5">{detalle.tipoServicio.replace('_', ' ')}</p>
+              </div>
               <button onClick={() => setDetalle(null)} className="text-gray-400 hover:text-white flex-shrink-0">✕</button>
             </div>
+
             <div className="p-6 overflow-y-auto space-y-5">
+              {/* Totales */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="bg-gray-800/60 rounded-xl p-4">
                   <p className="text-xs text-gray-500 mb-1">Total del proyecto</p>
@@ -308,27 +461,76 @@ export default function VentasPage() {
                 </div>
               </div>
 
+              {/* Costos waterfall */}
               <div className="bg-gray-800/40 rounded-xl p-4 space-y-2 text-sm">
-                <div className="flex justify-between"><span className="text-gray-400">Costo desarrollador</span><span className="text-white">{formatCurrency(detalle.costoDesarrollador)}</span></div>
-                <div className="flex justify-between"><span className="text-gray-400">Costo PM</span><span className="text-white">{formatCurrency(detalle.costoPM)}</span></div>
-                <div className="flex justify-between"><span className="text-gray-400">Comisión vendedor</span><span className="text-white">{formatCurrency(detalle.comisionVendedor)}</span></div>
-                <div className="flex justify-between border-t border-gray-700 pt-2 font-medium">
-                  <span className="text-gray-300">Ganancia agencia</span>
-                  <span className="text-green-400">{formatCurrency(detalle.precioTotal - detalle.costoDesarrollador - detalle.costoPM - detalle.comisionVendedor)}</span>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">
+                    Costos {detalle.costos.length === 0 && <span className="normal-case text-gray-600 font-normal">— sin costos cargados</span>}
+                  </p>
+                  <button
+                    onClick={openEditCostos}
+                    className="flex items-center gap-1 text-xs text-yellow-400 hover:text-yellow-300"
+                  >
+                    <Pencil className="w-3 h-3" /> Editar costos
+                  </button>
                 </div>
+
+                {detalle.costos.length === 0 ? (
+                  <p className="text-xs text-gray-600 py-1">
+                    Esta venta no tiene costos asignados. Hacé clic en &quot;Editar costos&quot; para agregarlos.
+                  </p>
+                ) : (() => {
+                  const { cobrado, ganancia } = calcWaterfall(detalle.totalPagado, detalle.costos)
+                  const ganFinal  = detalle.precioTotal - detalle.costos.reduce((s, c) => s + c.monto, 0)
+                  const pendiente = detalle.precioTotal - detalle.totalPagado
+                  return (
+                    <>
+                      {detalle.costos.map((costo, i) => {
+                        const cubierto = cobrado[i]
+                        const completo = cubierto >= costo.monto
+                        const parcial  = cubierto > 0 && !completo
+                        return (
+                          <div key={costo.id} className="flex justify-between items-center">
+                            <span className="text-gray-400">
+                              {i + 1}. {costo.descripcion}
+                              {costo.personaNombre && <span className="text-gray-600 ml-1">({costo.personaNombre})</span>}
+                            </span>
+                            <span className={completo ? 'text-green-400' : parcial ? 'text-yellow-400' : 'text-gray-600'}>
+                              {formatCurrency(cubierto)}
+                              {!completo && <span className="text-gray-700 ml-1">/ {formatCurrency(costo.monto)}</span>}
+                            </span>
+                          </div>
+                        )
+                      })}
+                      <div className="flex justify-between border-t border-gray-700 pt-2 font-medium">
+                        <span className="text-gray-300">Ganancia agencia</span>
+                        <span className={ganancia > 0 ? 'text-green-400' : 'text-gray-500'}>{formatCurrency(ganancia)}</span>
+                      </div>
+                      {pendiente > 0 && (
+                        <div className="flex justify-between text-xs pt-1 border-t border-gray-800 text-gray-500">
+                          <span>Ganancia final estimada (100%)</span>
+                          <span>{formatCurrency(ganFinal)}</span>
+                        </div>
+                      )}
+                    </>
+                  )
+                })()}
               </div>
 
+              {/* Estado */}
               <div>
                 <p className="text-xs text-gray-500 mb-2">Cambiar estado</p>
                 <div className="flex gap-2 flex-wrap">
                   {Object.entries(ESTADOS).map(([v, { label, color }]) => (
-                    <button key={v} onClick={() => cambiarEstado(detalle.id, v)} className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all ${detalle.estado === v ? color : 'bg-gray-800 border-gray-700 text-gray-400 hover:text-white'}`}>
+                    <button key={v} onClick={() => cambiarEstado(detalle.id, v)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all ${detalle.estado === v ? color : 'bg-gray-800 border-gray-700 text-gray-400 hover:text-white'}`}>
                       {label}
                     </button>
                   ))}
                 </div>
               </div>
 
+              {/* Pagos */}
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <p className="text-xs text-gray-500">Pagos registrados ({detalle.pagos?.length || 0})</p>
@@ -346,12 +548,95 @@ export default function VentasPage() {
                   ))}
                 </div>
               </div>
+
+              {/* Eliminar venta */}
+              <div className="border-t border-gray-800 pt-4">
+                <button
+                  onClick={() => setDeleteId(detalle.id)}
+                  className="flex items-center gap-2 text-xs text-red-400 hover:text-red-300 transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Eliminar venta
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Modal agregar pago */}
+      {/* ── Modal editar costos de venta existente ────────────────────────── */}
+      {editCostosModal && detalle && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between px-6 py-5 border-b border-gray-800">
+              <div>
+                <h3 className="text-lg font-semibold text-white">Editar costos</h3>
+                <p className="text-xs text-gray-500 mt-0.5">{detalle.nombreProyecto}</p>
+              </div>
+              <button onClick={() => setEditCostosModal(false)} className="text-gray-400 hover:text-white">✕</button>
+            </div>
+            <div className="p-6 space-y-4 overflow-y-auto">
+              <p className="text-xs text-gray-500">
+                Los costos se pagan en orden con cada pago recibido. Primero el 1, luego el 2, etc. La ganancia es lo que queda.
+              </p>
+              <div className="space-y-2">
+                {/* Header */}
+                <div className="grid grid-cols-12 gap-2 text-xs text-gray-600 px-1">
+                  <span className="col-span-1">#</span>
+                  <span className="col-span-4">Descripción</span>
+                  <span className="col-span-3">Monto</span>
+                  <span className="col-span-3">Persona</span>
+                  <span className="col-span-1"></span>
+                </div>
+                {editCostos.map((c, i) => (
+                  <div key={i} className="grid grid-cols-12 gap-2 items-center">
+                    <span className="col-span-1 text-xs text-gray-600 text-center">{i + 1}.</span>
+                    <input type="text" value={c.descripcion} onChange={e => updEditCosto(i, 'descripcion', e.target.value)}
+                      placeholder="Descripción"
+                      className="col-span-4 bg-gray-800 border border-gray-700 text-white rounded-xl px-3 py-2 text-xs placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-yellow-400" />
+                    <input type="number" value={c.monto} onChange={e => updEditCosto(i, 'monto', e.target.value)}
+                      placeholder="0"
+                      className="col-span-3 bg-gray-800 border border-gray-700 text-white rounded-xl px-3 py-2 text-xs placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-yellow-400" />
+                    <input type="text" value={c.personaNombre} onChange={e => updEditCosto(i, 'personaNombre', e.target.value)}
+                      placeholder="Quién"
+                      className="col-span-3 bg-gray-800 border border-gray-700 text-white rounded-xl px-3 py-2 text-xs placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-yellow-400" />
+                    <button onClick={() => removeEditCosto(i)} className="col-span-1 text-gray-600 hover:text-red-400 transition-colors flex justify-center">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <button onClick={addEditCosto} className="text-xs text-yellow-400 hover:text-yellow-300">+ Agregar costo</button>
+
+              {/* Preview con lo que ya se cobró */}
+              {editCostos.length > 0 && (() => {
+                const costosN    = editCostos.map(c => ({ monto: parseFloat(c.monto) || 0 }))
+                const totalC     = costosN.reduce((s, c) => s + c.monto, 0)
+                const { ganancia } = calcWaterfall(detalle.totalPagado, costosN)
+                const ganFinal   = detalle.precioTotal - totalC
+                return (
+                  <div className="bg-gray-800/60 rounded-xl px-4 py-3 text-xs space-y-1.5">
+                    <p className="text-gray-500 font-medium uppercase tracking-wide mb-1.5">Preview con cobrado actual ({formatCurrency(detalle.totalPagado)})</p>
+                    <div className="flex justify-between text-gray-400"><span>Total costos</span><span>{formatCurrency(totalC)}</span></div>
+                    <div className="flex justify-between text-gray-400"><span>Ganancia actual</span><span className={ganancia > 0 ? 'text-green-400' : 'text-gray-500'}>{formatCurrency(ganancia)}</span></div>
+                    <div className="flex justify-between font-medium border-t border-gray-700 pt-1.5">
+                      <span className="text-gray-400">Ganancia final estimada</span>
+                      <span className={ganFinal >= 0 ? 'text-green-400' : 'text-red-400'}>{formatCurrency(ganFinal)}</span>
+                    </div>
+                  </div>
+                )
+              })()}
+            </div>
+            <div className="flex gap-3 px-6 pb-6">
+              <button onClick={() => setEditCostosModal(false)} className="flex-1 bg-gray-800 hover:bg-gray-700 text-white rounded-xl py-2.5 text-sm font-medium transition-colors">Cancelar</button>
+              <button onClick={handleSaveEditCostos} disabled={editCostosSaving} className="flex-1 bg-yellow-400 hover:bg-yellow-300 disabled:bg-yellow-800 text-gray-900 rounded-xl py-2.5 text-sm font-semibold transition-colors">
+                {editCostosSaving ? 'Guardando...' : 'Guardar costos'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal agregar pago ─────────────────────────────────────────────── */}
       {pagoModal && detalle && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
           <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-sm shadow-2xl p-6">
@@ -359,11 +644,14 @@ export default function VentasPage() {
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-1.5">Monto</label>
-                <input type="number" value={pagoForm.monto} onChange={e => setPagoForm(p => ({ ...p, monto: e.target.value }))} placeholder="116666" className="w-full bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-2.5 text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
+                <input type="number" value={pagoForm.monto} onChange={e => setPagoForm(p => ({ ...p, monto: e.target.value }))}
+                  placeholder={detalle.valorCuota ? detalle.valorCuota.toString() : '50000'}
+                  className="w-full bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-2.5 text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-1.5">Tipo</label>
-                <select value={pagoForm.tipoPago} onChange={e => setPagoForm(p => ({ ...p, tipoPago: e.target.value }))} className="w-full bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400">
+                <select value={pagoForm.tipoPago} onChange={e => setPagoForm(p => ({ ...p, tipoPago: e.target.value }))}
+                  className="w-full bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400">
                   <option value="cuota">Cuota</option>
                   <option value="inicial">Inicial</option>
                   <option value="final">Final</option>
@@ -371,7 +659,9 @@ export default function VentasPage() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-1.5">Notas</label>
-                <input type="text" value={pagoForm.notas} onChange={e => setPagoForm(p => ({ ...p, notas: e.target.value }))} placeholder="Opcional" className="w-full bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-2.5 text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
+                <input type="text" value={pagoForm.notas} onChange={e => setPagoForm(p => ({ ...p, notas: e.target.value }))}
+                  placeholder="Opcional"
+                  className="w-full bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-2.5 text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
               </div>
             </div>
             <div className="flex gap-3 mt-6">
@@ -379,6 +669,25 @@ export default function VentasPage() {
               <button onClick={agregarPago} disabled={saving} className="flex-1 bg-yellow-400 hover:bg-yellow-300 text-gray-900 rounded-xl py-2.5 text-sm font-semibold transition-colors">
                 {saving ? 'Guardando...' : 'Registrar'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Confirmar eliminar venta ──────────────────────────────────────── */}
+      {deleteId && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[70] p-4">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-sm p-6">
+            <h3 className="text-lg font-semibold text-white mb-2">¿Eliminar venta?</h3>
+            <p className="text-gray-400 text-sm mb-1">
+              Si la venta tiene pagos registrados, se archivará (no se borrará) y el historial se conserva.
+            </p>
+            <p className="text-gray-600 text-xs mb-6">
+              Si no tiene pagos, se elimina definitivamente junto con sus costos.
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setDeleteId(null)} className="flex-1 bg-gray-800 hover:bg-gray-700 text-white rounded-xl py-2.5 text-sm font-medium transition-colors">Cancelar</button>
+              <button onClick={() => handleDelete(deleteId)} className="flex-1 bg-red-600 hover:bg-red-500 text-white rounded-xl py-2.5 text-sm font-medium transition-colors">Eliminar</button>
             </div>
           </div>
         </div>
