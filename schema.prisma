@@ -1,0 +1,85 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+// Usuario del sistema
+model Usuario {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  nombre    String
+  rol       String   @default("socio") // admin, socio
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Cliente
+model Cliente {
+  id          String   @id @default(cuid())
+  nombre      String
+  empresa     String?
+  email       String?
+  telefono    String?
+  sitioWeb    String?
+  vendedor    String
+  notas       String?
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relaciones
+  ventas      Venta[]
+}
+
+// Venta/Proyecto
+model Venta {
+  id                String   @id @default(cuid())
+  nombreProyecto    String
+  tipoServicio      String   // landing, web, ecommerce, campania, automation, otro
+  
+  // Financiero
+  precioTotal       Float
+  pagoInicial       Float
+  cantidadCuotas    Int      @default(0)
+  valorCuota        Float    @default(0)
+  
+  // Costos
+  costoDesarrollador Float   @default(0)
+  costoPM            Float   @default(0)
+  comisionVendedor   Float   @default(0)
+  
+  // Estado
+  estado            String   @default("activo") // activo, completado, cancelado
+  
+  // Fechas
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  // Relaciones
+  clienteId         String
+  cliente           Cliente  @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  pagos             Pago[]
+}
+
+// Pago
+model Pago {
+  id            String   @id @default(cuid())
+  monto         Float
+  fecha         DateTime @default(now())
+  tipoPago      String   // inicial, cuota, final
+  notas         String?
+  
+  // Relaciones
+  ventaId       String
+  venta         Venta    @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
