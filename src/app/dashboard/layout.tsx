@@ -3,13 +3,15 @@
 import { useEffect, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { LayoutDashboard, Users, ShoppingBag, CreditCard, LogOut, Menu } from 'lucide-react'
+import { LayoutDashboard, Users, ShoppingBag, CreditCard, LogOut, Menu, Receipt, RefreshCw } from 'lucide-react'
 
 const NAV = [
-  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/dashboard/clientes', label: 'Clientes', icon: Users },
-  { href: '/dashboard/ventas', label: 'Ventas', icon: ShoppingBag },
-  { href: '/dashboard/pagos', label: 'Pagos', icon: CreditCard },
+  { href: '/dashboard',                label: 'Dashboard',      icon: LayoutDashboard },
+  { href: '/dashboard/clientes',       label: 'Clientes',       icon: Users           },
+  { href: '/dashboard/ventas',         label: 'Ventas',         icon: ShoppingBag     },
+  { href: '/dashboard/pagos',          label: 'Pagos',          icon: CreditCard      },
+  { href: '/dashboard/mantenimiento',  label: 'Mantenimiento',  icon: RefreshCw       },
+  { href: '/dashboard/gastos',         label: 'Gastos',         icon: Receipt         },
 ]
 
 function SidebarContent({
@@ -34,6 +36,7 @@ function SidebarContent({
           <p className="text-xs text-gray-500">Panel de gestión</p>
         </div>
       </div>
+
       <nav className="flex-1 px-4 py-4 space-y-1">
         {NAV.map(({ href, label, icon: Icon }) => {
           const active = pathname === href || (href !== '/dashboard' && pathname.startsWith(href))
@@ -54,6 +57,7 @@ function SidebarContent({
           )
         })}
       </nav>
+
       <div className="px-4 pb-4 border-t border-gray-800 pt-4">
         {usuario && (
           <div className="px-4 py-2 mb-2">
@@ -84,9 +88,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   useEffect(() => {
     const token = localStorage.getItem('token')
-    if (!token) {
-      router.push('/login')
-    }
+    if (!token) router.push('/login')
   }, [router])
 
   function handleLogout() {
@@ -97,34 +99,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="flex h-screen bg-gray-950 overflow-hidden">
-      {/* Desktop sidebar */}
       <div className="hidden md:flex flex-col w-64 flex-shrink-0">
-        <SidebarContent
-          pathname={pathname}
-          usuario={usuario}
-          onLogout={handleLogout}
-          onClose={() => setSidebarOpen(false)}
-        />
+        <SidebarContent pathname={pathname} usuario={usuario} onLogout={handleLogout} onClose={() => {}} />
       </div>
 
-      {/* Mobile overlay */}
       {sidebarOpen && (
         <div className="fixed inset-0 z-40 md:hidden">
           <div className="absolute inset-0 bg-black/60" onClick={() => setSidebarOpen(false)} />
           <div className="relative z-50 w-64 h-full">
-            <SidebarContent
-              pathname={pathname}
-              usuario={usuario}
-              onLogout={handleLogout}
-              onClose={() => setSidebarOpen(false)}
-            />
+            <SidebarContent pathname={pathname} usuario={usuario} onLogout={handleLogout} onClose={() => setSidebarOpen(false)} />
           </div>
         </div>
       )}
 
-      {/* Main */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Mobile topbar */}
         <div className="md:hidden flex items-center justify-between px-4 py-4 border-b border-gray-800 bg-gray-950">
           <button onClick={() => setSidebarOpen(true)} className="p-2 text-gray-400 hover:text-white">
             <Menu className="w-5 h-5" />
@@ -132,10 +120,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <p className="text-sm font-semibold text-white">ERP Agencia</p>
           <div className="w-9" />
         </div>
-
-        <main className="flex-1 overflow-y-auto">
-          {children}
-        </main>
+        <main className="flex-1 overflow-y-auto">{children}</main>
       </div>
     </div>
   )

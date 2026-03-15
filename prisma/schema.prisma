@@ -9,77 +9,126 @@ datasource db {
   url      = "file:./dev.db"
 }
 
-// Usuario del sistema
 model Usuario {
   id        String   @id @default(cuid())
   email     String   @unique
   password  String
   nombre    String
-  rol       String   @default("socio") // admin, socio
+  rol       String   @default("socio")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
-// Cliente
 model Cliente {
-  id          String   @id @default(cuid())
-  nombre      String
-  empresa     String?
-  email       String?
-  telefono    String?
-  sitioWeb    String?
-  vendedor    String
-  notas       String?
-  activo      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
-  // Relaciones
-  ventas      Venta[]
+  id        String    @id @default(cuid())
+  nombre    String
+  empresa   String?
+  email     String?
+  telefono  String?
+  sitioWeb  String?
+  vendedor  String
+  notas     String?
+  activo    Boolean   @default(true)
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  ventas         Venta[]
+  mantenimientos Mantenimiento[]
 }
 
-// Venta/Proyecto
 model Venta {
-  id                String   @id @default(cuid())
-  nombreProyecto    String
-  tipoServicio      String   // landing, web, ecommerce, campania, automation, otro
-  
-  // Financiero
-  precioTotal       Float
-  pagoInicial       Float
-  cantidadCuotas    Int      @default(0)
-  valorCuota        Float    @default(0)
-  
-  // Costos
-  costoDesarrollador Float   @default(0)
-  costoPM            Float   @default(0)
-  comisionVendedor   Float   @default(0)
-  
-  // Estado
-  estado            String   @default("activo") // activo, completado, cancelado
-  
-  // Fechas
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  
-  // Relaciones
-  clienteId         String
-  cliente           Cliente  @relation(fields: [clienteId], references: [id], onDelete: Cascade)
-  pagos             Pago[]
+  id             String    @id @default(cuid())
+  nombreProyecto String
+  tipoServicio   String
+
+  precioTotal    Float
+  pagoInicial    Float
+  cantidadCuotas Int   @default(0)
+  valorCuota     Float @default(0)
+
+  estado    String    @default("activo")
+  deletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  clienteId String
+  cliente   Cliente    @relation(fields: [clienteId], references: [id])
+  pagos     Pago[]
+  costos    CostoVenta[]
 }
 
-// Pago
-model Pago {
-  id            String   @id @default(cuid())
+// Costos dinámicos por venta — cada uno tiene descripción, monto y persona asignada
+// Ejemplos: "Desarrollo" $78k Juan, "Gestión paid media" $30k Carlos, "Comisión" $80k Carlos
+model CostoVenta {
+  id            String  @id @default(cuid())
+  descripcion   String
   monto         Float
-  fecha         DateTime @default(now())
-  tipoPago      String   // inicial, cuota, final
-  notas         String?
-  
-  // Relaciones
-  ventaId       String
-  venta         Venta    @relation(fields: [ventaId], references: [id], onDelete: Cascade)
-  
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  personaNombre String?
+
+  ventaId String
+  venta   Venta  @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Pago {
+  id       String   @id @default(cuid())
+  monto    Float
+  fecha    DateTime @default(now())
+  tipoPago String
+  notas    String?
+
+  ventaId String
+  venta   Venta  @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Gasto {
+  id          String   @id @default(cuid())
+  descripcion String
+  monto       Float
+  categoria   String   @default("herramienta")
+  fecha       DateTime @default(now())
+  recurrente  Boolean  @default(false)
+  notas       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Mantenimiento {
+  id                  String   @id @default(cuid())
+  descripcion         String
+  montoMensual        Float
+  costoDesarrollador  Float    @default(0)
+  desarrolladorNombre String?
+
+  activo      Boolean  @default(true)
+  fechaInicio DateTime @default(now())
+  notas       String?
+
+  clienteId String?
+  cliente   Cliente? @relation(fields: [clienteId], references: [id])
+  cobros    CobroMantenimiento[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model CobroMantenimiento {
+  id    String   @id @default(cuid())
+  monto Float
+  fecha DateTime @default(now())
+  notas String?
+
+  mantenimientoId String
+  mantenimiento   Mantenimiento @relation(fields: [mantenimientoId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
