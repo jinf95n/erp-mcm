@@ -25,18 +25,19 @@ export async function PUT(
   const { id } = await params
   try {
     const body = await request.json()
-    const { nombre, rol, tipoCompensacion, monto, email, telefono, notas, activo } = body
+    const { nombre, rol, esSocio, tipoCompensacion, monto, email, telefono, notas, activo } = body
     const persona = await prisma.persona.update({
       where: { id },
       data: {
-        ...(nombre !== undefined && { nombre: nombre.trim() }),
-        ...(rol !== undefined && { rol }),
+        ...(nombre           !== undefined && { nombre: nombre.trim() }),
+        ...(rol              !== undefined && { rol }),
+        ...(esSocio          !== undefined && { esSocio: Boolean(esSocio) }),
         ...(tipoCompensacion !== undefined && { tipoCompensacion }),
-        ...(monto !== undefined && { monto: parseFloat(monto) }),
-        ...(email !== undefined && { email: email?.trim() || null }),
-        ...(telefono !== undefined && { telefono: telefono?.trim() || null }),
-        ...(notas !== undefined && { notas: notas?.trim() || null }),
-        ...(activo !== undefined && { activo }),
+        ...(monto            !== undefined && { monto: parseFloat(monto) }),
+        ...(email            !== undefined && { email: email?.trim()    || null }),
+        ...(telefono         !== undefined && { telefono: telefono?.trim() || null }),
+        ...(notas            !== undefined && { notas: notas?.trim()    || null }),
+        ...(activo           !== undefined && { activo }),
       },
     })
     return NextResponse.json(persona)
@@ -58,6 +59,6 @@ export async function DELETE(
     return NextResponse.json({ ok: true })
   } catch (error) {
     console.error(error)
-    return NextResponse.json({ error: 'Error al desactivar persona' }, { status: 500 })
+    return NextResponse.json({ error: 'Error al desactivar' }, { status: 500 })
   }
 }

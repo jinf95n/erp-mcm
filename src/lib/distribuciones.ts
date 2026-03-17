@@ -39,8 +39,8 @@ export async function generarDistribucionesVenta(
   const prev = calcWaterfall(prevTotal, costos)
   const curr = calcWaterfall(newTotal,  costos)
 
-  // Socios para dividir la ganancia
-  const socios = await prisma.persona.findMany({ where: { rol: 'socio', activo: true } })
+  // Socios para dividir la ganancia — usa esSocio en lugar de rol
+  const socios = await prisma.persona.findMany({ where: { esSocio: true, activo: true } })
   const sociosNombres = socios.length > 0 ? socios.map(s => s.nombre) : ['Juan', 'Carlos']
 
   const data: Array<{

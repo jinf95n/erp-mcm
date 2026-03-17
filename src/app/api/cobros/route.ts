@@ -15,7 +15,7 @@ async function generarDistribucionesMantenimiento(
   })
   if (!mantenimiento) return
 
-  const socios = await prisma.persona.findMany({ where: { rol: 'socio', activo: true } })
+  const socios = await prisma.persona.findMany({ where: { esSocio: true, activo: true } })
   const sociosNombres = socios.length > 0 ? socios.map(s => s.nombre) : ['Juan', 'Carlos']
 
   const costoDev   = mantenimiento.costoDesarrollador || 0
