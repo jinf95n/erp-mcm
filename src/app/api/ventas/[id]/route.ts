@@ -1,8 +1,10 @@
 // src/app/api/ventas/[id]/route.ts
+// PUT: al editar costos regenera distribuciones de todos los pagos existentes
 
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/src/lib/prisma'
 import { getSession } from '@/src/lib/auth-api'
+import { generarDistribucionesVenta } from '@/src/lib/distribuciones'
 
 export async function GET(
   request: NextRequest,
@@ -58,9 +60,27 @@ export async function PUT(
             descripcion:   c.descripcion?.trim() || 'Costo',
             monto:         parseFloat(String(c.monto)) || 0,
             personaNombre: c.personaNombre?.trim() || null,
-            personaId:     c.personaId || null,   // ← Fix: antes no se guardaba
+            personaId:     c.personaId || null,
           })),
         })
+      }
+
+      // Regenerar distribuciones de todos los pagos existentes con los costos nuevos
+      // 1. Eliminar todas las distribuciones de esta venta
+      await prisma.distribucion.deleteMany({ where: { ventaId: id } })
+
+      // 2. Obtener los costos recién creados y los pagos
+      const [costosNuevos, pagosVenta] = await Promise.all([
+        prisma.costoVenta.findMany({ where: { ventaId: id }, orderBy: { createdAt: 'asc' } }),
+        prisma.pago.findMany({ where: { ventaId: id }, orderBy: { fecha: 'asc' } }),
+      ])
+
+      // 3. Recrear distribuciones pago a pago en orden cronológico
+      //    Cada pago cubre la parte del waterfall que le corresponde
+      for (const pago of pagosVenta) {
+        if (costosNuevos.length > 0) {
+          await generarDistribucionesVenta(id, pago.id, pago.monto, costosNuevos)
+        }
       }
     }
 
