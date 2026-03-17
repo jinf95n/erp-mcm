@@ -1,12 +1,13 @@
 // src/app/api/dashboard/route.ts
+// Fix #6: socios se leen de la DB en lugar de array hardcodeado
 
 import { NextResponse } from 'next/server'
 import { prisma } from '@/src/lib/prisma'
+import { calcWaterfall } from '@/src/lib/waterfall'
 
-const SOCIOS = ['Juan', 'Carlos']
 
 type PersonaIngresos = {
-  [concepto: string]: number // dinámico por descripción de costo
+  [concepto: string]: number
   ganancia: number
 }
 
@@ -15,27 +16,15 @@ function getPersona(map: Record<string, PersonaIngresos>, nombre: string): Perso
   return map[nombre]
 }
 
-// Waterfall: los costos se cubren en orden con lo cobrado
-// El array viene ordenado como fue definido en la venta (dev primero, etc.)
-// Solo hay ganancia cuando ya se cubrieron todos los costos
-function calcWaterfall(
-  totalPagado: number,
-  costos: { monto: number }[]
-) {
-  let restante = totalPagado
-  const cobrado = costos.map(c => {
-    const cubierto = Math.min(restante, c.monto)
-    restante -= cubierto
-    return cubierto
-  })
-  return { cobrado, ganancia: restante }
-}
-
 export async function GET() {
   try {
     const now          = new Date()
     const primerDiaMes = new Date(now.getFullYear(), now.getMonth(), 1)
     const ultimoDiaMes = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+
+    // Fix #6: leer socios desde la DB
+    const sociosDB     = await prisma.persona.findMany({ where: { rol: 'socio', activo: true } })
+    const SOCIOS       = sociosDB.length > 0 ? sociosDB.map(s => s.nombre) : ['Juan', 'Carlos']
 
     const ventas = await prisma.venta.findMany({
       where: { deletedAt: null },
@@ -55,7 +44,6 @@ export async function GET() {
     const ingresosDelMes  = pagosDelMes.reduce((s, p) => s + p.monto, 0)
     const ingresosTotales = pagosValidos.reduce((s, p) => s + p.monto, 0)
 
-    // Acumuladores para distribución
     const distribucionCostos: Record<string, number> = {}
     let gananciaAgenciaBruta = 0
 
@@ -65,7 +53,6 @@ export async function GET() {
     ventas.forEach(venta => {
       const totalPagado = venta.pagos.reduce((s, p) => s + p.monto, 0)
       if (venta.precioTotal <= 0 || venta.costos.length === 0) {
-        // Sin costos definidos: todo es ganancia
         gananciaAgenciaBruta += totalPagado
         SOCIOS.forEach(s => {
           getPersona(ingresosPorPersona, s).ganancia += totalPagado / SOCIOS.length
@@ -144,6 +131,13 @@ export async function GET() {
 
     const gananciaNeta = gananciaAgenciaBruta - gastosTotales
 
+    // ── Caja ──────────────────────────────────────────────────────────────
+    const distribuciones    = await prisma.distribucion.findMany()
+    const salidasPagadas    = distribuciones.filter(d => d.estado === 'pagado').reduce((s, d) => s + d.monto, 0)
+    const salidasPendientes = distribuciones.filter(d => d.estado === 'pendiente').reduce((s, d) => s + d.monto, 0)
+    const totalCobrado      = ingresosTotales + ingresosMantenimiento
+    const cajaActual        = totalCobrado - salidasPagadas - gastosTotales
+
     const pagosPendientes = ventas.reduce((sum, v) => {
       const cobrado = v.pagos.reduce((s, p) => s + p.monto, 0)
       return sum + (v.precioTotal - cobrado)
@@ -190,6 +184,9 @@ export async function GET() {
       gastosTotales,
       gastosDelMes,
       gananciaNeta,
+      cajaActual,
+      salidasPagadas,
+      salidasPendientes,
       totalMensualMantenimiento,
       totalDesarrolladores,
       totalPMs,
