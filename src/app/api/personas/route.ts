@@ -28,19 +28,20 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json()
-    const { nombre, rol, tipoCompensacion, monto, email, telefono, notas } = body
+    const { nombre, rol, esSocio, tipoCompensacion, monto, email, telefono, notas } = body
 
     if (!nombre?.trim()) return NextResponse.json({ error: 'El nombre es requerido' }, { status: 400 })
 
     const persona = await prisma.persona.create({
       data: {
-        nombre: nombre.trim(),
-        rol: rol || 'otro',
+        nombre:           nombre.trim(),
+        rol:              rol || 'otro',
+        esSocio:          Boolean(esSocio),
         tipoCompensacion: tipoCompensacion || 'ars',
-        monto: parseFloat(monto || 0),
-        email: email?.trim() || null,
-        telefono: telefono?.trim() || null,
-        notas: notas?.trim() || null,
+        monto:            parseFloat(monto || 0),
+        email:            email?.trim()    || null,
+        telefono:         telefono?.trim() || null,
+        notas:            notas?.trim()    || null,
       },
     })
     return NextResponse.json(persona, { status: 201 })

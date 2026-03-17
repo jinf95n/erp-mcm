@@ -22,9 +22,10 @@ model Usuario {
 model Persona {
   id               String   @id @default(cuid())
   nombre           String
-  rol              String   @default("otro") // dev | pm | vendedor | socio | otro
-  tipoCompensacion String   @default("ars")  // porcentaje | ars | usd
-  monto            Float    @default(0)       // referencial
+  rol              String   @default("otro")   // ceo | cto | dev | pm | vendedor | otro
+  esSocio          Boolean  @default(false)    // recibe split de ganancia agencia
+  tipoCompensacion String   @default("ars")    // porcentaje | ars | usd
+  monto            Float    @default(0)
   email            String?
   telefono         String?
   notas            String?

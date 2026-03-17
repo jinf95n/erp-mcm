@@ -22,8 +22,8 @@ export async function GET() {
     const primerDiaMes = new Date(now.getFullYear(), now.getMonth(), 1)
     const ultimoDiaMes = new Date(now.getFullYear(), now.getMonth() + 1, 0)
 
-    // Fix #6: leer socios desde la DB
-    const sociosDB     = await prisma.persona.findMany({ where: { rol: 'socio', activo: true } })
+    // Fix: leer socios desde la DB usando esSocio
+    const sociosDB     = await prisma.persona.findMany({ where: { esSocio: true, activo: true } })
     const SOCIOS       = sociosDB.length > 0 ? sociosDB.map(s => s.nombre) : ['Juan', 'Carlos']
 
     const ventas = await prisma.venta.findMany({
