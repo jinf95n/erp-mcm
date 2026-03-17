@@ -48,11 +48,17 @@ export async function PUT(
       await prisma.costoVenta.deleteMany({ where: { ventaId: id } })
       if (costos.length > 0) {
         await prisma.costoVenta.createMany({
-          data: costos.map((c: { descripcion: string; monto: string | number; personaNombre?: string }) => ({
+          data: costos.map((c: {
+            descripcion:    string
+            monto:          string | number
+            personaNombre?: string
+            personaId?:     string
+          }) => ({
             ventaId:       id,
             descripcion:   c.descripcion?.trim() || 'Costo',
             monto:         parseFloat(String(c.monto)) || 0,
             personaNombre: c.personaNombre?.trim() || null,
+            personaId:     c.personaId || null,   // ← Fix: antes no se guardaba
           })),
         })
       }

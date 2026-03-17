@@ -1,6 +1,10 @@
+// src/app/dashboard/pagos/page.tsx
+// Lista de pagos con edición y eliminación por ID
+
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { Pencil, Trash2 } from 'lucide-react'
 import { formatCurrency } from '@/src/lib/utils'
 
 interface Pago {
@@ -18,23 +22,29 @@ interface Pago {
 }
 
 function getToken() { return typeof window !== 'undefined' ? localStorage.getItem('token') : '' }
-function authHeaders() { return { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` } }
+function authH()    { return { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` } }
 
 const TIPOS_COLOR: Record<string, string> = {
-  inicial:  'bg-blue-900/40 text-blue-400 border-blue-700/40',
-  cuota:    'bg-yellow-900/40 text-yellow-400 border-yellow-700/40',
-  final:    'bg-green-900/40 text-green-400 border-green-700/40',
+  inicial: 'bg-blue-900/40 text-blue-400 border-blue-700/40',
+  cuota:   'bg-yellow-900/40 text-yellow-400 border-yellow-700/40',
+  final:   'bg-green-900/40 text-green-400 border-green-700/40',
 }
 
 export default function PagosPage() {
-  const [pagos, setPagos] = useState<Pago[]>([])
+  const [pagos, setPagos]     = useState<Pago[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const [error, setError]     = useState('')
+  // Editar
+  const [editId, setEditId]   = useState<string | null>(null)
+  const [editForm, setEditForm] = useState({ monto: '', tipoPago: 'cuota', notas: '', fecha: '' })
+  const [saving, setSaving]   = useState(false)
+  // Eliminar
+  const [deleteId, setDeleteId] = useState<string | null>(null)
 
   const fetchPagos = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch('/api/pagos', { headers: authHeaders() })
+      const res  = await fetch('/api/pagos', { headers: authH() })
       const data = await res.json()
       setPagos(data.pagos || [])
     } catch { setError('Error al cargar pagos') }
@@ -43,12 +53,37 @@ export default function PagosPage() {
 
   useEffect(() => { fetchPagos() }, [fetchPagos])
 
-  const totalCobrado = pagos.reduce((s, p) => s + p.monto, 0)
+  function openEdit(p: Pago) {
+    setEditId(p.id)
+    setEditForm({
+      monto:    p.monto.toString(),
+      tipoPago: p.tipoPago,
+      notas:    p.notas || '',
+      fecha:    new Date(p.fecha).toISOString().split('T')[0],
+    })
+  }
 
+  async function handleEdit() {
+    if (!editId) return
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/pagos/${editId}`, {
+        method: 'PUT', headers: authH(), body: JSON.stringify(editForm),
+      })
+      if (res.ok) { setEditId(null); fetchPagos() }
+    } finally { setSaving(false) }
+  }
+
+  async function handleDelete(id: string) {
+    try {
+      await fetch(`/api/pagos/${id}`, { method: 'DELETE', headers: authH() })
+      setDeleteId(null); fetchPagos()
+    } catch { setError('Error al eliminar') }
+  }
+
+  const totalCobrado = pagos.reduce((s, p) => s + p.monto, 0)
   const porTipo: Record<string, number> = {}
-  pagos.forEach(p => {
-    porTipo[p.tipoPago] = (porTipo[p.tipoPago] || 0) + p.monto
-  })
+  pagos.forEach(p => { porTipo[p.tipoPago] = (porTipo[p.tipoPago] || 0) + p.monto })
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -57,14 +92,13 @@ export default function PagosPage() {
         <p className="text-gray-400 text-sm mt-1">Historial de cobros registrados</p>
       </div>
 
-      {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5">
           <p className="text-xs text-gray-500 mb-1">Total cobrado</p>
           <p className="text-xl font-bold text-yellow-400">{formatCurrency(totalCobrado)}</p>
         </div>
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5">
-          <p className="text-xs text-gray-500 mb-1">Cantidad de pagos</p>
+          <p className="text-xs text-gray-500 mb-1">Cantidad</p>
           <p className="text-xl font-bold text-white">{pagos.length}</p>
         </div>
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5">
@@ -77,9 +111,7 @@ export default function PagosPage() {
         </div>
       </div>
 
-      {error && (
-        <p className="text-red-400 text-sm bg-red-950/50 border border-red-800 rounded-xl px-4 py-3 mb-4">{error}</p>
-      )}
+      {error && <p className="text-red-400 text-sm bg-red-950/50 border border-red-800 rounded-xl px-4 py-3 mb-4">{error}</p>}
 
       <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
         {loading ? (
@@ -99,6 +131,7 @@ export default function PagosPage() {
                 <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-6 py-4 hidden md:table-cell">Fecha</th>
                 <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-6 py-4 hidden lg:table-cell">Tipo</th>
                 <th className="text-right text-xs font-medium text-gray-500 uppercase tracking-wider px-6 py-4">Monto</th>
+                <th className="px-6 py-4"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800">
@@ -106,7 +139,9 @@ export default function PagosPage() {
                 <tr key={p.id} className="hover:bg-gray-800/30 transition-colors">
                   <td className="px-6 py-4">
                     <p className="text-sm font-medium text-white">{p.venta.nombreProyecto}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">{p.venta.cliente.nombre}{p.venta.cliente.empresa ? ` · ${p.venta.cliente.empresa}` : ''}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {p.venta.cliente.nombre}{p.venta.cliente.empresa ? ` · ${p.venta.cliente.empresa}` : ''}
+                    </p>
                     {p.notas && <p className="text-xs text-gray-500 mt-0.5 italic">{p.notas}</p>}
                   </td>
                   <td className="px-6 py-4 hidden md:table-cell">
@@ -120,6 +155,18 @@ export default function PagosPage() {
                   <td className="px-6 py-4 text-right">
                     <span className="text-sm font-semibold text-yellow-400">{formatCurrency(p.monto)}</span>
                   </td>
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-1.5 justify-end">
+                      <button onClick={() => openEdit(p)}
+                        className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors">
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={() => setDeleteId(p.id)}
+                        className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-red-950/50 rounded-lg transition-colors">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -127,9 +174,73 @@ export default function PagosPage() {
         )}
       </div>
 
-      <p className="text-xs text-gray-600 mt-4 text-center">
-        Para registrar nuevos pagos, ingresá a una venta desde la sección Ventas y hacé clic en &quot;Agregar pago&quot;
-      </p>
+      {/* Modal editar pago */}
+      {editId && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-sm p-6">
+            <h3 className="text-lg font-semibold text-white mb-4">Editar pago</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Monto</label>
+                <input type="number" value={editForm.monto}
+                  onChange={e => setEditForm(p => ({ ...p, monto: e.target.value }))}
+                  className="w-full bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Tipo</label>
+                <select value={editForm.tipoPago}
+                  onChange={e => setEditForm(p => ({ ...p, tipoPago: e.target.value }))}
+                  className="w-full bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400">
+                  <option value="inicial">Inicial</option>
+                  <option value="cuota">Cuota</option>
+                  <option value="final">Final</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Fecha</label>
+                <input type="date" value={editForm.fecha}
+                  onChange={e => setEditForm(p => ({ ...p, fecha: e.target.value }))}
+                  className="w-full bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Notas</label>
+                <input type="text" value={editForm.notas}
+                  onChange={e => setEditForm(p => ({ ...p, notas: e.target.value }))}
+                  placeholder="Opcional"
+                  className="w-full bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-2.5 text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
+              </div>
+            </div>
+            <p className="text-xs text-orange-400 bg-orange-950/30 border border-orange-800/40 rounded-xl px-3 py-2 mt-4">
+              ⚠️ Al editar el monto se recalculan las distribuciones automáticamente.
+            </p>
+            <div className="flex gap-3 mt-4">
+              <button onClick={() => setEditId(null)}
+                className="flex-1 bg-gray-800 hover:bg-gray-700 text-white rounded-xl py-2.5 text-sm font-medium transition-colors">Cancelar</button>
+              <button onClick={handleEdit} disabled={saving}
+                className="flex-1 bg-yellow-400 hover:bg-yellow-300 disabled:bg-yellow-800 text-gray-900 rounded-xl py-2.5 text-sm font-semibold transition-colors">
+                {saving ? 'Guardando...' : 'Guardar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmar eliminar */}
+      {deleteId && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-sm p-6">
+            <h3 className="text-lg font-semibold text-white mb-2">¿Eliminar pago?</h3>
+            <p className="text-gray-400 text-sm mb-1">Se eliminará el pago y sus distribuciones asociadas.</p>
+            <p className="text-gray-600 text-xs mb-6">El estado de la venta se recalcula automáticamente.</p>
+            <div className="flex gap-3">
+              <button onClick={() => setDeleteId(null)}
+                className="flex-1 bg-gray-800 hover:bg-gray-700 text-white rounded-xl py-2.5 text-sm font-medium transition-colors">Cancelar</button>
+              <button onClick={() => handleDelete(deleteId)}
+                className="flex-1 bg-red-600 hover:bg-red-500 text-white rounded-xl py-2.5 text-sm font-medium transition-colors">Eliminar</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
