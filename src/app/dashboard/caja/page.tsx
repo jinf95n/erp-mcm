@@ -1,10 +1,11 @@
 // src/app/dashboard/caja/page.tsx
-// Flujo de caja: ingresos cobrados - salidas (distribuciones pagadas) - gastos = saldo en cuenta
+// Fix: agrupa distribuciones por personaId (no por nombre string)
+// → misma persona aparece una sola vez aunque tenga distintos personaNombre
 
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Wallet, TrendingDown, Clock, CheckCircle2, DollarSign, RefreshCw } from 'lucide-react'
+import { Wallet, Clock, CheckCircle2, DollarSign } from 'lucide-react'
 import { formatCurrency } from '@/src/lib/utils'
 
 interface Persona { id: string; nombre: string; rol: string }
@@ -22,24 +23,43 @@ interface Distribucion {
   persona: Persona | null
   venta: Venta | null
 }
-interface DolarInfo { compra: number | null; venta: number | null; promedio: number | null; fecha: string | null; error?: string }
+interface DashMetrics {
+  ingresosTotales: number
+  gastosTotales: number
+  cajaActual: number
+  salidasPagadas: number
+  salidasPendientes: number
+}
+interface DolarInfo {
+  promedio: number | null
+  error?: string
+}
 
 function getToken() { return typeof window !== 'undefined' ? localStorage.getItem('token') : '' }
 function authH()    { return { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` } }
 
+// Clave de agrupación: usa personaId si existe, sino personaNombre, sino 'sin-asignar'
+function clavePersona(d: Distribucion): string {
+  return d.personaId || d.personaNombre || 'sin-asignar'
+}
+
+// Nombre a mostrar: usa el nombre del perfil vinculado si existe
+function nombrePersona(d: Distribucion): string {
+  return d.persona?.nombre || d.personaNombre || 'Sin asignar'
+}
+
 export default function CajaPage() {
   const [distribuciones, setDistribuciones] = useState<Distribucion[]>([])
-  const [dashMetrics, setDashMetrics]        = useState<{ ingresosTotales: number; gastosTotales: number; cajaActual: number; salidasPagadas: number; salidasPendientes: number } | null>(null)
+  const [dashMetrics, setDashMetrics]        = useState<DashMetrics | null>(null)
   const [dolar, setDolar]                    = useState<DolarInfo | null>(null)
   const [loading, setLoading]                = useState(true)
   const [filtro, setFiltro]                  = useState<'todos' | 'pendiente' | 'pagado'>('pendiente')
   const [error, setError]                    = useState('')
-  // Modal marcar pagado
-  const [pagoModal, setPagoModal] = useState(false)
-  const [pagoDistId, setPagoDistId] = useState<string | null>(null)
-  const [pagoFecha, setPagoFecha]   = useState('')
-  const [pagoNotas, setPagoNotas]   = useState('')
-  const [saving, setSaving]         = useState(false)
+  const [pagoModal, setPagoModal]            = useState(false)
+  const [pagoDistId, setPagoDistId]          = useState<string | null>(null)
+  const [pagoFecha, setPagoFecha]            = useState('')
+  const [pagoNotas, setPagoNotas]            = useState('')
+  const [saving, setSaving]                  = useState(false)
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -49,15 +69,15 @@ export default function CajaPage() {
         fetch('/api/dashboard',      { headers: authH() }),
         fetch('/api/dolar',          { headers: authH() }),
       ])
-      const dDist = await rDist.json()
-      const dDash = await rDash.json()
-      const dDolar = await rDolar.json()
+      const [dDist, dDash, dDolar] = await Promise.all([
+        rDist.json(), rDash.json(), rDolar.json(),
+      ])
       setDistribuciones(dDist.distribuciones || [])
       setDashMetrics({
-        ingresosTotales:  dDash.ingresosTotales,
-        gastosTotales:    dDash.gastosTotales,
-        cajaActual:       dDash.cajaActual,
-        salidasPagadas:   dDash.salidasPagadas,
+        ingresosTotales:   dDash.ingresosTotales,
+        gastosTotales:     dDash.gastosTotales,
+        cajaActual:        dDash.cajaActual,
+        salidasPagadas:    dDash.salidasPagadas,
         salidasPendientes: dDash.salidasPendientes,
       })
       setDolar(dDolar)
@@ -93,14 +113,27 @@ export default function CajaPage() {
     fetchData()
   }
 
-  const filtradas = distribuciones.filter(d => filtro === 'todos' || d.estado === filtro)
+  const filtradas = distribuciones.filter(d =>
+    filtro === 'todos' || d.estado === filtro
+  )
 
-  // Agrupar por persona
-  const porPersona = filtradas.reduce<Record<string, { nombre: string; items: Distribucion[]; total: number }>>((acc, d) => {
-    const nombre = d.persona?.nombre || d.personaNombre || 'Sin asignar'
-    if (!acc[nombre]) acc[nombre] = { nombre, items: [], total: 0 }
-    acc[nombre].items.push(d)
-    acc[nombre].total += d.monto
+  // Agrupar por personaId (cuando existe) o personaNombre como fallback
+  // → evita duplicados cuando la misma persona tiene distintos personaNombre
+  const porPersona = filtradas.reduce<Record<string, {
+    clave: string
+    nombre: string
+    items: Distribucion[]
+    total: number
+  }>>((acc, d) => {
+    const clave  = clavePersona(d)
+    const nombre = nombrePersona(d)
+    if (!acc[clave]) acc[clave] = { clave, nombre, items: [], total: 0 }
+    // Si el nombre del perfil vinculado es más corto/mejor, actualizarlo
+    if (d.persona?.nombre && acc[clave].nombre !== d.persona.nombre) {
+      acc[clave].nombre = d.persona.nombre
+    }
+    acc[clave].items.push(d)
+    acc[clave].total += d.monto
     return acc
   }, {})
 
@@ -111,7 +144,6 @@ export default function CajaPage() {
           <h1 className="text-2xl font-bold text-white">Caja</h1>
           <p className="text-gray-400 text-sm mt-1">Saldo real y distribución del dinero</p>
         </div>
-        {/* Dólar oficial */}
         {dolar && !dolar.error && dolar.promedio && (
           <div className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-2.5 flex items-center gap-2">
             <DollarSign className="w-4 h-4 text-green-400" />
@@ -159,7 +191,7 @@ export default function CajaPage() {
         </div>
       )}
 
-      {/* Barra de fórmula visual */}
+      {/* Fórmula visual */}
       {dashMetrics && (
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 mb-6">
           <p className="text-xs text-gray-500 mb-3">Composición del saldo</p>
@@ -184,7 +216,7 @@ export default function CajaPage() {
       <div className="flex gap-2 mb-5">
         {(['pendiente', 'pagado', 'todos'] as const).map(f => (
           <button key={f} onClick={() => setFiltro(f)}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-medium border transition-colors capitalize ${
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-medium border transition-colors ${
               filtro === f
                 ? 'bg-yellow-400 border-yellow-400 text-gray-900'
                 : 'bg-gray-800 border-gray-700 text-gray-400 hover:text-white'
@@ -201,19 +233,24 @@ export default function CajaPage() {
       ) : Object.keys(porPersona).length === 0 ? (
         <div className="text-center py-16 text-gray-500">
           <Wallet className="w-12 h-12 mx-auto mb-3 text-gray-700" />
-          <p className="font-medium">Sin distribuciones {filtro !== 'todos' ? `${filtro}s` : ''}</p>
+          <p className="font-medium">Sin distribuciones {filtro !== 'todos' ? 'pendientes' : ''}</p>
           <p className="text-sm mt-1">Registrá pagos en una venta para que aparezcan aquí</p>
         </div>
       ) : (
         <div className="space-y-6">
-          {Object.entries(porPersona).map(([nombre, grupo]) => (
-            <div key={nombre}>
+          {Object.values(porPersona).map(grupo => (
+            <div key={grupo.clave}>
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <div className="w-7 h-7 rounded-lg bg-yellow-400/20 border border-yellow-400/30 flex items-center justify-center">
-                    <span className="text-xs font-bold text-yellow-400">{nombre.charAt(0)}</span>
+                    <span className="text-xs font-bold text-yellow-400">
+                      {grupo.nombre.charAt(0).toUpperCase()}
+                    </span>
                   </div>
-                  <span className="text-sm font-semibold text-white">{nombre}</span>
+                  <span className="text-sm font-semibold text-white">{grupo.nombre}</span>
+                  <span className="text-xs text-gray-600">
+                    {grupo.items.length} ítem{grupo.items.length !== 1 ? 's' : ''}
+                  </span>
                 </div>
                 <span className="text-sm font-bold text-white">{formatCurrency(grupo.total)}</span>
               </div>
@@ -224,15 +261,15 @@ export default function CajaPage() {
                     {grupo.items.map(d => (
                       <tr key={d.id} className="hover:bg-gray-800/30 transition-colors">
                         <td className="px-5 py-3.5">
-                          <div>
-                            <p className="text-sm text-white">{d.descripcion}</p>
-                            {d.venta && <p className="text-xs text-gray-500 mt-0.5">{d.venta.nombreProyecto}</p>}
-                            {d.fechaPago && (
-                              <p className="text-xs text-gray-600 mt-0.5">
-                                Enviado: {new Date(d.fechaPago).toLocaleDateString('es-AR')}
-                              </p>
-                            )}
-                          </div>
+                          <p className="text-sm text-white">{d.descripcion}</p>
+                          {d.venta && (
+                            <p className="text-xs text-gray-500 mt-0.5">{d.venta.nombreProyecto}</p>
+                          )}
+                          {d.fechaPago && (
+                            <p className="text-xs text-gray-600 mt-0.5">
+                              Enviado: {new Date(d.fechaPago).toLocaleDateString('es-AR')}
+                            </p>
+                          )}
                         </td>
                         <td className="px-5 py-3.5">
                           <span className={`inline-flex px-2 py-1 rounded-lg text-xs font-medium border ${
@@ -244,12 +281,14 @@ export default function CajaPage() {
                           </span>
                         </td>
                         <td className="px-5 py-3.5 text-right">
-                          <span className="text-sm font-semibold text-white">{formatCurrency(d.monto)}</span>
+                          <span className="text-sm font-semibold text-white">
+                            {formatCurrency(d.monto)}
+                          </span>
                         </td>
                         <td className="px-5 py-3.5 text-right">
                           {d.estado === 'pendiente' ? (
                             <button onClick={() => abrirMarcarPagado(d.id)}
-                              className="text-xs bg-green-900/40 hover:bg-green-900/60 text-green-400 border border-green-700/40 px-3 py-1.5 rounded-lg transition-colors">
+                              className="text-xs bg-green-900/40 hover:bg-green-900/60 text-green-400 border border-green-700/40 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap">
                               Marcar enviado
                             </button>
                           ) : (
@@ -292,7 +331,9 @@ export default function CajaPage() {
             </div>
             <div className="flex gap-3 mt-5">
               <button onClick={() => setPagoModal(false)}
-                className="flex-1 bg-gray-800 hover:bg-gray-700 text-white rounded-xl py-2.5 text-sm font-medium transition-colors">Cancelar</button>
+                className="flex-1 bg-gray-800 hover:bg-gray-700 text-white rounded-xl py-2.5 text-sm font-medium transition-colors">
+                Cancelar
+              </button>
               <button onClick={marcarPagado} disabled={saving}
                 className="flex-1 bg-green-600 hover:bg-green-500 text-white rounded-xl py-2.5 text-sm font-semibold transition-colors">
                 {saving ? 'Guardando...' : 'Confirmar envío'}
