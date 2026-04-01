@@ -53,6 +53,7 @@ model Cliente {
 
   ventas         Venta[]
   mantenimientos Mantenimiento[]
+  cotizaciones   Cotizacion[]
 }
 
 model Venta {
@@ -162,4 +163,40 @@ model CobroMantenimiento {
   mantenimiento   Mantenimiento @relation(fields: [mantenimientoId], references: [id], onDelete: Cascade)
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
+}
+
+model Cotizacion {
+  id              String   @id @default(cuid())
+  numero          String   @unique
+  nombre          String
+  clienteId       String?
+  cliente         Cliente? @relation(fields: [clienteId], references: [id])
+  estado          String   @default("borrador") // borrador | enviada | aceptada | rechazada
+  moneda          String   @default("usd")
+  tipoCambio      Float    @default(1300)
+  validezDias     Int      @default(15)
+  condicionesPago String?
+  notasInternas   String?
+  notasCliente    String?
+  descuentoGlobal Float    @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  items           ItemCotizacion[]
+}
+
+model ItemCotizacion {
+  id            String     @id @default(cuid())
+  cotizacionId  String
+  cotizacion    Cotizacion @relation(fields: [cotizacionId], references: [id], onDelete: Cascade)
+  descripcion   String
+  tipoServicio  String     @default("otro")
+  roles         String     @default("[]") // JSON: [{personaNombre, tarifaHora, horas}]
+  modoMargen    String     @default("markup") // markup | margin
+  margen        Float      @default(0.35)
+  descuento     Float      @default(0)
+  tipoInversion String     @default("unica_vez") // unica_vez | mensual
+  orden         Int        @default(0)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
 }
