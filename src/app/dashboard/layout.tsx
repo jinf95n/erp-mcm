@@ -7,13 +7,14 @@ import { usePathname, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   LayoutDashboard, Users, ShoppingBag, CreditCard, LogOut,
-  Menu, Receipt, RefreshCw, UserCircle, Wallet,
+  Menu, Receipt, RefreshCw, UserCircle, Wallet, FileText
 } from 'lucide-react'
 
 const NAV = [
   { href: '/dashboard',               label: 'Dashboard',     icon: LayoutDashboard },
   { href: '/dashboard/clientes',      label: 'Clientes',      icon: Users           },
   { href: '/dashboard/ventas',        label: 'Ventas',        icon: ShoppingBag     },
+  { href: '/dashboard/cotizaciones', label: 'Cotizaciones', icon: FileText },
   { href: '/dashboard/pagos',         label: 'Pagos',         icon: CreditCard      },
   { href: '/dashboard/mantenimiento', label: 'Mantenimiento', icon: RefreshCw       },
   { href: '/dashboard/gastos',        label: 'Gastos',        icon: Receipt         },
